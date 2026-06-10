@@ -120,12 +120,47 @@
 
   <script>
     const SERVICE_AREA_ZIP_PATTERN = /^(?:110(?!04|05)\d{2}|115\d{2}|117\d{2}|118\d{2}|119\d{2})(?:-\d{4})?$/;
+    const SERVICE_AREA_LOCALITIES = new Set([
+      'AMAGANSETT', 'AMITYVILLE', 'AQUEBOGUE', 'ASHAROKEN', 'ATLANTIC BEACH',
+      'BABYLON', 'BALDWIN', 'BAY SHORE', 'BAYPORT', 'BAYVILLE', 'BELLEROSE',
+      'BELLEROSE VILLAGE', 'BELLMORE', 'BELLPORT', 'BETHPAGE', 'BLUE POINT',
+      'BOHEMIA', 'BRENTWOOD', 'BRIDGEHAMPTON', 'BRIGHTWATERS', 'BROOKHAVEN',
+      'CALVERTON', 'CARLE PLACE', 'CENTER MORICHES', 'CENTERPORT', 'CENTEREACH',
+      'CENTRAL ISLIP', 'COLD SPRING HARBOR', 'COMMACK', 'COPIAGUE', 'CORAM',
+      'CUTCHOGUE', 'DEER PARK', 'DIX HILLS', 'EAST ATLANTIC BEACH', 'EAST FARMINGDALE',
+      'EAST HAMPTON', 'EAST ISLIP', 'EAST MARION', 'EAST MEADOW', 'EAST MORICHES',
+      'EAST NORTHPORT', 'EAST NORWICH', 'EAST PATCHOGUE', 'EAST QUOGUE', 'EAST ROCKAWAY',
+      'EAST SETAUKET', 'EASTPORT', 'ELMONT', 'FARMINGDALE', 'FISHERS ISLAND',
+      'FLANDERS', 'FLORAL PARK', 'FORT SALONGA', 'FRANKLIN SQUARE', 'FREEPORT',
+      'GARDEN CITY', 'GILGO-OAK BEACH-CAPTREE', 'GLEN COVE', 'GLEN HEAD', 'GLENWOOD LANDING',
+      'GREAT NECK', 'GREAT RIVER', 'GREENLAWN', 'GREENPORT', 'GREENVALE',
+      'HAMPTON BAYS', 'HAUPPAUGE', 'HEMPSTEAD', 'HEWLETT', 'HICKSVILLE',
+      'HOLBROOK', 'HOLTSVILLE', 'HUNTINGTON', 'HUNTINGTON STATION', 'INWOOD',
+      'ISLAND PARK', 'ISLANDIA', 'ISLIP', 'ISLIP TERRACE', 'JAMESPORT',
+      'JERICHO', 'KINGS PARK', 'LAKE GROVE', 'LAKE RONKONKOMA', 'LAUREL',
+      'LAWRENCE', 'LEVITTOWN', 'LINDENHURST', 'LOCUST VALLEY', 'LONG BEACH',
+      'LYNBROOK', 'MANHASSET', 'MANORVILLE', 'MASTIC', 'MASTIC BEACH',
+      'MATTITUCK', 'MEDFORD', 'MELVILLE', 'MERRICK', 'MILLER PLACE',
+      'MINEOLA', 'MONTAUK', 'MORICHES', 'MOUNT SINAI', 'NAPEAGUE',
+      'NESCONSET', 'NEW HYDE PARK', 'NORTH BABYLON', 'NORTH BELLMORE', 'NORTH HEMPSTEAD',
+      'NORTH MASSAPEQUA', 'NORTH MERRICK', 'NORTHPORT', 'OAKDALE', 'OCEANSIDE',
+      'OLD BETHPAGE', 'OLD WESTBURY', 'OYSTER BAY', 'PATCHOGUE', 'PECONIC',
+      'PLAINVIEW', 'POINT LOOKOUT', 'PORT JEFFERSON', 'PORT JEFFERSON STATION', 'PORT WASHINGTON',
+      'QUOGUE', 'REMSENBURG-SPEONK', 'RIVERHEAD', 'ROCKVILLE CENTRE', 'ROCKY POINT',
+      'RONKONKOMA', 'ROOSEVELT', 'ROSLYN', 'SAG HARBOR', 'SAGAPONACK',
+      'SAINT JAMES', 'SANDS POINT', 'SAYVILLE', 'SEA CLIFF', 'SEAFORD',
+      'SELDEN', 'SETAUKET-EAST SETAUKET', 'SHELTER ISLAND', 'SHIRLEY', 'SHOREHAM',
+      'SMITHTOWN', 'SOUTH JAMESPORT', 'SOUTHAMPTON', 'SOUTHOLD', 'SPEONK',
+      'ST JAMES', 'STONY BROOK', 'SYOSSET', 'UNIONDALE', 'UPPER BROOKVILLE',
+      'VALLEY STREAM', 'WADING RIVER', 'WAINSCOTT', 'WANTAGH', 'WATER MILL',
+      'WEST BABYLON', 'WEST HAMPTON DUNES', 'WEST HEMPSTEAD', 'WEST ISLIP', 'WEST SAYVILLE',
+      'WESTBURY', 'WESTHAMPTON', 'WESTHAMPTON BEACH', 'WYANDANCH', 'YAPHANK'
+    ]);
     const SOUTHWEST = { lat: 40.5300, lng: -74.1000 };
     const NORTHEAST = { lat: 41.1700, lng: -71.7000 };
     const MAX_VISIBLE_SUGGESTIONS = 5;
-    const MAX_DETAIL_LOOKUPS = 10;
     const MIN_SEARCH_CHARS = 2;
-    const DEBOUNCE_MS = 120;
+    const DEBOUNCE_MS = 60;
 
     const input = document.getElementById('addressInput');
     const suggestions = document.getElementById('suggestions');
@@ -226,23 +261,40 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = item.display;
-      button.addEventListener('click', () => {
-        selectedValue = item.value;
-        input.value = item.display;
-        clearSuggestions();
-        setStatus('', false);
-        sendValue(selectedValue, true);
-      });
+      button.addEventListener('click', () => selectPrediction(item));
       li.appendChild(button);
       suggestions.appendChild(li);
       suggestions.classList.add('visible');
       resizeFrame();
     }
 
-    function detailForPrediction(prediction) {
+    function predictionLooksLikeStreetAddress(prediction) {
+      return /^\d+\s+\S+/.test(prediction.description || '');
+    }
+
+    function localityFromPrediction(prediction) {
+      const secondary = prediction.structured_formatting && prediction.structured_formatting.secondary_text
+        ? prediction.structured_formatting.secondary_text
+        : prediction.description || '';
+      const parts = secondary.split(',').map(part => part.trim().toUpperCase()).filter(Boolean);
+      const nyIndex = parts.indexOf('NY');
+      if (nyIndex > 0) {
+        return parts[nyIndex - 1];
+      }
+      const descriptionParts = (prediction.description || '').split(',').map(part => part.trim().toUpperCase()).filter(Boolean);
+      const descriptionNyIndex = descriptionParts.indexOf('NY');
+      return descriptionNyIndex > 0 ? descriptionParts[descriptionNyIndex - 1] : '';
+    }
+
+    function predictionLooksInServiceArea(prediction) {
+      return predictionLooksLikeStreetAddress(prediction)
+        && SERVICE_AREA_LOCALITIES.has(localityFromPrediction(prediction));
+    }
+
+    function detailForPlaceId(placeId) {
       return new Promise(resolve => {
         placesService.getDetails({
-          placeId: prediction.place_id,
+          placeId,
           fields: ['address_components', 'formatted_address', 'geometry']
         }, (place, status) => {
           if (status !== google.maps.places.PlacesServiceStatus.OK || !place) {
@@ -251,6 +303,24 @@
           }
           resolve(placeToAddress(place));
         });
+      });
+    }
+
+    function selectPrediction(item) {
+      selectedValue = '';
+      sendValue('', false);
+      input.value = item.display;
+      clearSuggestions();
+      setStatus('Verifying address...', false);
+      detailForPlaceId(item.placeId).then(address => {
+        if (!address) {
+          setStatus('Select a full Nassau or Suffolk address.', true);
+          return;
+        }
+        selectedValue = address.value;
+        input.value = address.display;
+        setStatus('', false);
+        sendValue(selectedValue, true);
       });
     }
 
@@ -272,27 +342,17 @@
           setStatus('No Nassau or Suffolk address matches found.', false);
           return;
         }
-        clearSuggestions();
         const seenDisplays = new Set();
-        let completed = 0;
-        let visibleCount = 0;
-        predictions.slice(0, MAX_DETAIL_LOOKUPS).forEach(prediction => {
-          detailForPrediction(prediction).then(item => {
-            if (serial !== requestSerial) {
-              return;
-            }
-            completed += 1;
-            if (item && visibleCount < MAX_VISIBLE_SUGGESTIONS && !seenDisplays.has(item.display)) {
-              seenDisplays.add(item.display);
-              visibleCount += 1;
-              appendSuggestion(item);
-              setStatus('', false);
-            }
-            if (completed === Math.min(predictions.length, MAX_DETAIL_LOOKUPS) && visibleCount === 0) {
-              setStatus('No Nassau or Suffolk address matches found.', false);
-            }
-          });
+        const items = [];
+        predictions.forEach(prediction => {
+          if (!predictionLooksInServiceArea(prediction) || seenDisplays.has(prediction.description)) {
+            return;
+          }
+          seenDisplays.add(prediction.description);
+          items.push({ display: prediction.description, placeId: prediction.place_id });
         });
+        renderSuggestions(items.slice(0, MAX_VISIBLE_SUGGESTIONS));
+        setStatus(items.length ? '' : 'No Nassau or Suffolk address matches found.', false);
       });
     }
 
