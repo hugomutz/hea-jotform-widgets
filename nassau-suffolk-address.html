@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nassau Suffolk Address</title>
+  <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #2f3337;
+    }
+
+    .address-widget {
+      position: relative;
+      width: 100%;
+      max-width: 700px;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #3f4750;
+    }
+
+    input {
+      width: 100%;
+      height: 42px;
+      border: 1px solid #b8c0cc;
+      border-radius: 4px;
+      padding: 9px 11px;
+      font-size: 16px;
+      line-height: 22px;
+      color: #20262d;
+      background: #fff;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #4c8bf5;
+      box-shadow: 0 0 0 2px rgba(76, 139, 245, 0.18);
+    }
+
+    .status {
+      min-height: 18px;
+      margin-top: 5px;
+      font-size: 12px;
+      line-height: 18px;
+      color: #68717c;
+    }
+
+    .status.error {
+      color: #b3261e;
+      font-weight: 600;
+    }
+
+    .suggestions {
+      position: absolute;
+      z-index: 20;
+      top: 68px;
+      right: 0;
+      left: 0;
+      display: none;
+      margin: 0;
+      padding: 4px 0;
+      list-style: none;
+      border: 1px solid #c5ccd6;
+      border-radius: 4px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(32, 38, 45, 0.18);
+    }
+
+    .suggestions.visible {
+      display: block;
+    }
+
+    .suggestions button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      padding: 8px 11px;
+      font: inherit;
+      font-size: 14px;
+      line-height: 20px;
+      text-align: left;
+      color: #20262d;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .suggestions button:hover,
+    .suggestions button:focus {
+      background: #eef4ff;
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="address-widget">
+    <label for="addressInput">Service address</label>
+    <input id="addressInput" type="text" autocomplete="off" placeholder="Search Nassau or Suffolk address">
+    <ul id="suggestions" class="suggestions" role="listbox"></ul>
+    <div id="status" class="status" aria-live="polite"></div>
+    <div id="placesHost" hidden></div>
+  </div>
+
+  <script>
+    const SERVICE_AREA_ZIP_PATTERN = /^(?:110(?!04|05)\d{2}|115\d{2}|117\d{2}|118\d{2}|119\d{2})(?:-\d{4})?$/;
+    const SOUTHWEST = { lat: 40.5300, lng: -74.1000 };
+    const NORTHEAST = { lat: 41.1700, lng: -71.7000 };
+    const MAX_VISIBLE_SUGGESTIONS = 5;
+    const DEBOUNCE_MS = 260;
+
+    const input = document.getElementById('addressInput');
+    const suggestions = document.getElementById('suggestions');
+    const statusEl = document.getElementById('status');
+    const placesHost = document.getElementById('placesHost');
+
+    let autocompleteService = null;
+    let placesService = null;
+    let selectedValue = '';
+    let pendingTimer = 0;
+    let requestSerial = 0;
+
+    function widgetSetting(name) {
+      if (window.JFCustomWidget && typeof JFCustomWidget.getWidgetSetting === 'function') {
+        const value = JFCustomWidget.getWidgetSetting(name);
+        if (value) {
+          return value;
+        }
+      }
+      return new URLSearchParams(window.location.search).get(name) || '';
+    }
+
+    function setStatus(message, isError) {
+      statusEl.textContent = message || '';
+      statusEl.classList.toggle('error', Boolean(isError));
+      resizeFrame();
+    }
+
+    function resizeFrame() {
+      if (window.JFCustomWidget && typeof JFCustomWidget.requestFrameResize === 'function') {
+        JFCustomWidget.requestFrameResize({
+          width: 700,
+          height: document.documentElement.scrollHeight + 8
+        });
+      }
+    }
+
+    function formattedComponent(place, type, useShortName) {
+      const components = place.address_components || [];
+      const component = components.find(item => item.types && item.types.includes(type));
+      if (!component) {
+        return '';
+      }
+      return useShortName ? component.short_name : component.long_name;
+    }
+
+    function streetAddress(place) {
+      const number = formattedComponent(place, 'street_number', false);
+      const route = formattedComponent(place, 'route', false);
+      return [number, route].filter(Boolean).join(' ').trim();
+    }
+
+    function placeToAddress(place) {
+      const street = streetAddress(place);
+      const city = formattedComponent(place, 'locality', false)
+        || formattedComponent(place, 'postal_town', false)
+        || formattedComponent(place, 'sublocality', false);
+      const state = formattedComponent(place, 'administrative_area_level_1', true);
+      const postal = formattedComponent(place, 'postal_code', false);
+      if (!street || !city || state !== 'NY' || !SERVICE_AREA_ZIP_PATTERN.test(postal)) {
+        return null;
+      }
+      return {
+        display: place.formatted_address || [street, city, state, postal].filter(Boolean).join(', '),
+        value: [
+          `Street Address: ${street}`,
+          `City: ${city}`,
+          `State / Province: ${state}`,
+          `Postal / Zip Code: ${postal}`
+        ].join('\n')
+      };
+    }
+
+    function sendValue(value, valid) {
+      if (window.JFCustomWidget && typeof JFCustomWidget.sendData === 'function') {
+        JFCustomWidget.sendData({ valid: Boolean(valid), value: value || '' });
+      }
+    }
+
+    function clearSuggestions() {
+      suggestions.innerHTML = '';
+      suggestions.classList.remove('visible');
+      resizeFrame();
+    }
+
+    function renderSuggestions(items) {
+      suggestions.innerHTML = '';
+      items.forEach(item => {
+        const li = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = item.display;
+        button.addEventListener('click', () => {
+          selectedValue = item.value;
+          input.value = item.display;
+          clearSuggestions();
+          setStatus('', false);
+          sendValue(selectedValue, true);
+        });
+        li.appendChild(button);
+        suggestions.appendChild(li);
+      });
+      suggestions.classList.toggle('visible', items.length > 0);
+      resizeFrame();
+    }
+
+    function detailForPrediction(prediction) {
+      return new Promise(resolve => {
+        placesService.getDetails({
+          placeId: prediction.place_id,
+          fields: ['address_components', 'formatted_address', 'geometry']
+        }, (place, status) => {
+          if (status !== google.maps.places.PlacesServiceStatus.OK || !place) {
+            resolve(null);
+            return;
+          }
+          resolve(placeToAddress(place));
+        });
+      });
+    }
+
+    async function searchAddresses(query, serial) {
+      const serviceBounds = new google.maps.LatLngBounds(SOUTHWEST, NORTHEAST);
+      autocompleteService.getPlacePredictions({
+        input: query,
+        types: ['address'],
+        bounds: serviceBounds,
+        locationRestriction: serviceBounds,
+        strictBounds: true,
+        componentRestrictions: { country: 'us' }
+      }, async (predictions, status) => {
+        if (serial !== requestSerial) {
+          return;
+        }
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions || predictions.length === 0) {
+          clearSuggestions();
+          setStatus('No Nassau or Suffolk address matches found.', false);
+          return;
+        }
+        const details = await Promise.all(predictions.slice(0, 8).map(detailForPrediction));
+        if (serial !== requestSerial) {
+          return;
+        }
+        const filtered = details.filter(Boolean).slice(0, MAX_VISIBLE_SUGGESTIONS);
+        renderSuggestions(filtered);
+        setStatus(filtered.length ? '' : 'No Nassau or Suffolk address matches found.', false);
+      });
+    }
+
+    function scheduleSearch() {
+      selectedValue = '';
+      sendValue('', false);
+      clearTimeout(pendingTimer);
+      const query = input.value.trim();
+      if (query.length < 4) {
+        clearSuggestions();
+        setStatus('', false);
+        return;
+      }
+      setStatus('Searching...', false);
+      const serial = ++requestSerial;
+      pendingTimer = window.setTimeout(() => searchAddresses(query, serial), DEBOUNCE_MS);
+    }
+
+    function loadGooglePlaces(apiKey) {
+      return new Promise((resolve, reject) => {
+        window.__heaAddressInit = resolve;
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=__heaAddressInit`;
+        script.async = true;
+        script.onerror = () => reject(new Error('Google Places failed to load.'));
+        document.head.appendChild(script);
+      });
+    }
+
+    function initializeWidget() {
+      const apiKey = widgetSetting('apiKey');
+      const initialValue = widgetSetting('value') || '';
+      if (initialValue) {
+        selectedValue = initialValue;
+        input.value = initialValue.split('\n')[0].replace(/^Street Address:\s*/, '');
+      }
+      if (!apiKey) {
+        setStatus('Google Maps API key is missing.', true);
+        return;
+      }
+      loadGooglePlaces(apiKey)
+        .then(() => {
+          autocompleteService = new google.maps.places.AutocompleteService();
+          placesService = new google.maps.places.PlacesService(placesHost);
+          input.addEventListener('input', scheduleSearch);
+          input.addEventListener('blur', () => window.setTimeout(clearSuggestions, 180));
+          sendValue(selectedValue, Boolean(selectedValue));
+          resizeFrame();
+        })
+        .catch(error => setStatus(error.message, true));
+    }
+
+    if (window.JFCustomWidget && typeof JFCustomWidget.subscribe === 'function') {
+      JFCustomWidget.subscribe('ready', initializeWidget);
+      JFCustomWidget.subscribe('submit', () => {
+        JFCustomWidget.sendSubmit({
+          valid: Boolean(selectedValue),
+          value: selectedValue
+        });
+      });
+    } else {
+      initializeWidget();
+    }
+  </script>
+</body>
+</html>
