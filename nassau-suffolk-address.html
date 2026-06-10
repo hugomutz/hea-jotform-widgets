@@ -173,6 +173,9 @@
     function streetAddress(place) {
       const number = formattedComponent(place, 'street_number', false);
       const route = formattedComponent(place, 'route', false);
+      if (!number || !route) {
+        return '';
+      }
       return [number, route].filter(Boolean).join(' ').trim();
     }
 
