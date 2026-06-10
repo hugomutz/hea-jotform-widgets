@@ -69,13 +69,10 @@
     }
 
     .suggestions {
-      position: absolute;
+      position: static;
       z-index: 20;
-      top: 68px;
-      right: 0;
-      left: 0;
       display: none;
-      margin: 0;
+      margin: 6px 0 0;
       padding: 4px 0;
       list-style: none;
       border: 1px solid #c5ccd6;
@@ -161,6 +158,8 @@
     const MAX_VISIBLE_SUGGESTIONS = 5;
     const MIN_SEARCH_CHARS = 2;
     const DEBOUNCE_MS = 60;
+    const COLLAPSED_FRAME_HEIGHT = 88;
+    const EXPANDED_FRAME_HEIGHT = 320;
 
     const input = document.getElementById('addressInput');
     const suggestions = document.getElementById('suggestions');
@@ -191,9 +190,10 @@
 
     function resizeFrame() {
       if (window.JFCustomWidget && typeof JFCustomWidget.requestFrameResize === 'function') {
+        const isExpanded = suggestions.classList.contains('visible');
         JFCustomWidget.requestFrameResize({
           width: 700,
-          height: document.documentElement.scrollHeight + 8
+          height: isExpanded ? EXPANDED_FRAME_HEIGHT : COLLAPSED_FRAME_HEIGHT
         });
       }
     }
