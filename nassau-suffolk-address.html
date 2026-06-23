@@ -21,12 +21,14 @@
       padding: 0;
       background: #fff;
       color: #2f3337;
+      overflow: visible;
     }
 
     .address-widget {
       position: relative;
       width: 100%;
       max-width: 100%;
+      overflow: visible;
     }
 
     label {
@@ -73,36 +75,66 @@
       z-index: 20;
       display: none;
       margin: 6px 0 0;
-      padding: 4px 0;
+      max-height: 282px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 3px;
       list-style: none;
-      border: 1px solid #c5ccd6;
-      border-radius: 4px;
+      border: 1px solid #aebdc8;
+      border-radius: 6px;
       background: #fff;
-      box-shadow: 0 8px 18px rgba(32, 38, 45, 0.18);
+      box-shadow: 0 10px 24px rgba(24, 45, 58, 0.2);
+      -webkit-overflow-scrolling: touch;
     }
 
     .suggestions.visible {
       display: block;
     }
 
+    .suggestions li + li {
+      border-top: 1px solid #eef2f5;
+    }
+
     .suggestions button {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: flex-start;
       width: 100%;
-      min-height: 38px;
+      min-height: 48px;
       border: 0;
-      padding: 8px 11px;
+      border-radius: 4px;
+      padding: 8px 10px;
       font: inherit;
-      font-size: 14px;
-      line-height: 20px;
       text-align: left;
       color: #20262d;
       background: transparent;
       cursor: pointer;
+      white-space: normal;
     }
 
     .suggestions button:hover,
     .suggestions button:focus {
       background: #eef4ff;
       outline: none;
+    }
+
+    .suggestion-main {
+      display: block;
+      color: #102633;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 18px;
+      overflow-wrap: anywhere;
+    }
+
+    .suggestion-meta {
+      display: block;
+      color: #5e6d78;
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 16px;
+      overflow-wrap: anywhere;
     }
   </style>
 </head>
@@ -159,7 +191,7 @@
     const MIN_SEARCH_CHARS = 2;
     const DEBOUNCE_MS = 60;
     const COLLAPSED_FRAME_HEIGHT = 88;
-    const EXPANDED_FRAME_HEIGHT = 320;
+    const EXPANDED_FRAME_HEIGHT = 380;
 
     const input = document.getElementById('addressInput');
     const suggestions = document.getElementById('suggestions');
@@ -191,8 +223,13 @@
     function resizeFrame() {
       if (window.JFCustomWidget && typeof JFCustomWidget.requestFrameResize === 'function') {
         const isExpanded = suggestions.classList.contains('visible');
-        JFCustomWidget.requestFrameResize({
-          height: isExpanded ? EXPANDED_FRAME_HEIGHT : COLLAPSED_FRAME_HEIGHT
+        const requestedHeight = isExpanded ? EXPANDED_FRAME_HEIGHT : COLLAPSED_FRAME_HEIGHT;
+        document.documentElement.style.minHeight = `${requestedHeight}px`;
+        document.body.style.minHeight = `${requestedHeight}px`;
+        window.requestAnimationFrame(() => {
+          JFCustomWidget.requestFrameResize({
+            height: isExpanded ? EXPANDED_FRAME_HEIGHT : COLLAPSED_FRAME_HEIGHT
+          });
         });
       }
     }
@@ -258,8 +295,19 @@
     function appendSuggestion(item) {
       const li = document.createElement('li');
       const button = document.createElement('button');
+      const main = document.createElement('span');
+      const meta = document.createElement('span');
       button.type = 'button';
-      button.textContent = item.display;
+      button.setAttribute("role", "option");
+      button.setAttribute('aria-label', item.display);
+      main.className = 'suggestion-main';
+      main.textContent = item.main || item.display;
+      meta.className = 'suggestion-meta';
+      meta.textContent = item.secondary || '';
+      button.appendChild(main);
+      if (meta.textContent) {
+        button.appendChild(meta);
+      }
       button.addEventListener('click', () => selectPrediction(item));
       li.appendChild(button);
       suggestions.appendChild(li);
@@ -344,11 +392,19 @@
         const seenDisplays = new Set();
         const items = [];
         predictions.forEach(prediction => {
-          if (!predictionLooksInServiceArea(prediction) || seenDisplays.has(prediction.description)) {
+          const display = prediction.description || '';
+          if (!predictionLooksInServiceArea(prediction) || seenDisplays.has(display)) {
             return;
           }
-          seenDisplays.add(prediction.description);
-          items.push({ display: prediction.description, placeId: prediction.place_id });
+          const formatting = prediction.structured_formatting || {};
+          const descriptionParts = display.split(',').map(part => part.trim()).filter(Boolean);
+          seenDisplays.add(display);
+          items.push({
+            display,
+            main: formatting.main_text || descriptionParts[0] || display,
+            secondary: formatting.secondary_text || descriptionParts.slice(1).join(', '),
+            placeId: prediction.place_id
+          });
         });
         renderSuggestions(items.slice(0, MAX_VISIBLE_SUGGESTIONS));
         setStatus(items.length ? '' : 'No Nassau or Suffolk address matches found.', false);
